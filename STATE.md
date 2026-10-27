@@ -5,3 +5,5 @@
 公开仓库：https://github.com/qiuyiwu1989-star/search-steward 。实现提交 bc11e7e；GitHub CI 40455885870 成功。
 
 002：独立实现提交队列、清单 v1、问题聚合和发布闸门，34 项测试通过。未修改生产队列、数据库、定时任务。旧 personal coverage adapter 不经过通用 v1 清单；后续需单独接线。
+
+002 发布：ff42072；GitHub CI 40457108777 成功。仅独立仓库代码，未切换生产。
