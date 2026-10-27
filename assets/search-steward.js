@@ -1,0 +1,64 @@
+'use strict';
+(() => {
+if(!sessionStorage.getItem('steward-token')){const t=prompt('输入本机 Search Steward 访问令牌（仅存本标签会话）');if(t)sessionStorage.setItem('steward-token',t);}
+const $=id=>document.getElementById(id), base='/api/inside/search-steward';
+const names={open:'待处理',doing:'进行中',verify:'待复验',done:'已完成',deferred:'已暂缓',running:'巡检中',blocked:'抓取受阻',complete:'巡检结束',failed:'失败',interrupted:'已中断',submission:'提交回执',geo:'GEO 观测',metric:'效果指标',automation:'自动化登记',success:'全部接受',partial:'部分接受',unknown:'待核实',active:'运行中',paused:'暂停',unverified:'待核实',accurate:'准确',inaccurate:'不准确',unreviewed:'未审校'};
+let state=null, selected='',loading=false;
+const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const date=v=>v?new Date(v).toLocaleString('zh-CN'):'—';
+const empty=text=>`<div class="empty">${esc(text)}</div>`;
+const relevant=rows=>rows.filter(r=>r.site_id===selected);
+function notice(s){$('notice').textContent=s;}
+async function api(path,method='GET',payload){const r=await fetch(base+path,{method,credentials:'same-origin',headers:{'Content-Type':'application/json',...(sessionStorage.getItem('steward-token')?{'Authorization':'Bearer '+sessionStorage.getItem('steward-token')}:{})},...(payload?{body:JSON.stringify(payload)}:{})});let d;try{d=await r.json();}catch{throw Error('后台未返回数据，请检查登录或模块是否已部署');}if(!r.ok)throw Error(d.error||'请求失败');return d;}
+function link(u){try{const p=new URL(u);if(!['http:','https:'].includes(p.protocol))return esc(u);return `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(u)}</a>`;}catch{return esc(u);}}
+async function refresh(){if(loading)return;loading=true;try{state=await api('/snapshot');if(!selected||!state.sites.some(s=>s.id===selected))selected=state.sites[0]?.id||'';$('site').innerHTML=state.sites.map(s=>`<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');$('site').value=selected;render();}catch(e){notice(e.message);}finally{loading=false;}}
+function render(){
+const tasks=relevant(state.tasks),scans=relevant(state.scans),records=relevant(state.records),last=scans[0];
+$('summary').innerHTML=[['待处理问题',tasks.filter(t=>!['done','deferred'].includes(t.state)).length],['最近巡检页数',last?.result?.pages?.length??'未巡检'],['提交回执',records.filter(r=>r.kind==='submission').length],['GEO 观测',records.filter(r=>r.kind==='geo').length]].map(([a,b])=>`<div><span>${a}</span><strong>${b}</strong></div>`).join('');
+$('sites').innerHTML=state.sites.map(s=>{let scan=state.scans.find(x=>x.site_id===s.id);return `<div class="item"><b>${esc(s.name)}</b> <span class="badge">${esc(scan?names[scan.state]:'未巡检')}</span><br>${link(s.url)}<small> ${scan?date(scan.started):'待建立基线'}</small></div>`;}).join('');
+$('scans').innerHTML=scans.length?scans.slice(0,12).map(s=>`<div class="item"><b>${esc(names[s.state])}</b> <small>${date(s.started)}</small>${s.result?`<p>${s.result.pages?.length??0} 页已检查 · ${s.result.findings?.length??0} 条发现${s.result.truncated?' · 部分覆盖，仍有页面待查':''}</p><details><summary>范围、发现与证据</summary><pre>${esc(JSON.stringify(s.result,null,2))}</pre></details>`:'<p>正在读取公开页面，完成后自动更新。</p>'}${s.state==='running'&&Date.now()-Date.parse(s.started)>900000?`<button data-interrupt="${esc(s.id)}">标记超时并允许重试</button>`:''}</div>`).join(''):empty('尚无巡检记录。可先检查当前站点。');
+renderTasks();renderRecords('submission-records',records.filter(r=>['submission','automation'].includes(r.kind)));renderRecords('geo-records',records.filter(r=>r.kind==='geo'));renderRecords('metric-records',records.filter(r=>r.kind==='metric'));
+$('events').innerHTML=state.events.slice(0,40).map(e=>`<div class="item"><small>${date(e.created)}</small> ${esc(e.action)}<details><summary>记录详情</summary><pre>${esc(e.detail)}</pre></details></div>`).join('')||empty('暂无操作记录');
+$('scan').disabled=scans.some(s=>s.state==='running');
+loadPlatforms();
+}
+function renderTasks(){const rows=relevant(state.tasks).filter(t=>!$('task-filter').value||t.state===$('task-filter').value);$('task-list').innerHTML=rows.map(t=>`<div class="item"><span class="badge">${esc(t.priority)}</span><span class="badge">${esc(names[t.state])}</span><b>${esc(t.title)}</b><small> 更新于 ${date(t.updated)}</small><details><summary>更新状态 / 记录复验证据</summary><form class="task-edit" data-task="${esc(t.id)}"><label>状态<select name="state">${['open','doing','verify','done','deferred'].map(s=>`<option value="${s}" ${s===t.state?'selected':''}>${names[s]}</option>`).join('')}</select></label><label>负责人<input name="owner" value="${esc(t.owner)}" maxlength="100"></label><textarea name="evidence" aria-label="复验证据或暂缓原因" maxlength="4000" placeholder="完成需复验证据，暂缓需原因">${esc(t.evidence)}</textarea><button>保存进度</button></form></details></div>`).join('')||empty('当前筛选下没有任务；未巡检不代表没有问题。');}
+function renderRecords(id,rows){$(id).innerHTML=rows.map(r=>{let p=r.payload;let text=r.kind==='submission'?`${p.engine} · ${p.runner}\n提交 ${p.submitted}，接受 ${p.accepted}，失败 ${p.failed} · ${names[p.status]}`:r.kind==='automation'?`${p.engine} · ${p.runner}\n${p.schedule} · ${names[p.status]}`:r.kind==='geo'?`${p.product} / ${p.mode}\n${p.question}\n审校：${names[p.accuracy]} · 引用 ${p.citations.length} 条`:`${p.source} · ${p.observed_at} 至 ${p.period_end}\n索引 ${p.indexed??'未知'} · 曝光 ${p.impressions??'未知'} · 点击 ${p.clicks??'未知'}`;return `<div class="item"><span class="badge">${names[r.kind]}</span><small>${esc(p.observed_at)}</small><p>${esc(text)}</p><details><summary>查看依据</summary><pre>${esc(JSON.stringify(p,null,2))}</pre></details></div>`;}).join('')||empty('暂无真实记录。填写观测后会保留历史，不以 0 代替未知。');}
+async function submit(form,path,method='POST',transform=x=>x){const b=form.querySelector('button');b.disabled=true;try{let d=Object.fromEntries(new FormData(form));await api(path,method,transform({...d,site_id:selected}));notice('已保存到后台。');if(!form.dataset.task){form.reset();setDates();}await refresh();}catch(e){notice(e.message);}finally{b.disabled=false;}}
+$('site-form').onsubmit=e=>{e.preventDefault();submit(e.target,'/sites');};$('task-form').onsubmit=e=>{e.preventDefault();submit(e.target,'/tasks');};
+for(const kind of ['submission','automation','geo','metric','connection'])$(kind+'-form').onsubmit=e=>{e.preventDefault();submit(e.target,'/records/'+kind,'POST',d=>{for(const k of ['submitted','accepted','failed','indexed','impressions','clicks'])if(k in d)d[k]=d[k]===''?null:Number(d[k]);if(kind==='geo')d.citations=d.citations.split('\n').map(s=>s.trim()).filter(Boolean);return d;});};
+$('task-list').onsubmit=e=>{if(!e.target.dataset.task)return;e.preventDefault();submit(e.target,'/tasks/'+e.target.dataset.task,'PATCH');};
+$('scans').onclick=async e=>{const id=e.target.dataset.interrupt;if(!id)return;try{await api('/scans/'+id+'/interrupt','POST',{});await refresh();}catch(err){notice(err.message);}};
+$('scan').onclick=async()=>{if(!selected)return;$('scan').disabled=true;try{await api('/scans','POST',{site_id:selected,limit:50});notice('巡检已启动，发现的问题会进入整改任务。');await refresh();}catch(e){notice(e.message);$('scan').disabled=false;}};
+$('site').onchange=()=>{selected=$('site').value;render();};$('task-filter').onchange=renderTasks;$('refresh').onclick=refresh;
+$('export').onclick=()=>{if(!state)return;const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}),u=URL.createObjectURL(blob),a=document.createElement('a');a.href=u;a.download='seo-geo-records-'+new Date().toISOString().slice(0,10)+'.json';a.click();URL.revokeObjectURL(u);notice('已导出当前记录窗口：最近 100 次巡检、500 条观测和 100 条操作历史。');};
+document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab-panel').forEach(p=>p.hidden=p.id!==b.dataset.tab);document.querySelectorAll('[data-tab]').forEach(x=>x.removeAttribute('aria-current'));b.setAttribute('aria-current','page');});
+let platformData=null,platformRequest=0;
+async function loadPlatforms(){
+ if(!selected)return;const version=++platformRequest,site=selected;
+ try{const d=await api('/platforms?site_id='+encodeURIComponent(site));if(version!==platformRequest||site!==selected)return;platformData=d;
+ document.querySelectorAll('.platform-select').forEach(el=>{const value=el.value;el.innerHTML='<option value="">请选择平台</option>'+d.platforms.map(p=>`<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');el.value=value;});
+ const status={pending:'待验证',verified:'人工已核验配置',blocked:'受阻',paused:'暂停'};
+ $('platform-list').innerHTML=d.platforms.map(p=>`<div class="item"><span class="badge">${esc(p.kind.toUpperCase())} · ${esc(p.priority)}</span><b>${esc(p.name)}</b> <span class="badge">${esc(p.connection?status[p.connection.status]:'尚无接入核验')}</span><p>${esc(p.note)}</p><p>下一步：${esc(p.connection?.next_action||p.next)}</p><small>核验日期：${p.connection?esc(p.connection.observed_at):'尚无'} · 已标平台证据 ${p.record_count} 条${p.kind==='geo'?` · 产品观测 ${p.product_samples} 次 / API 样本 ${p.api_samples} 次 · 引用管理域名 ${p.cited_samples} 次 · 待审校 ${p.unreviewed_samples} 次`:''}</small>${p.docs?`<p>官方资料：${link(p.docs)}</p>`:''}<button class="secondary" data-platform-task="${esc(p.id)}">加入当前站点整改任务</button><details><summary>最近证据与观测（最多 20 条）</summary><pre>${esc(JSON.stringify({connection:p.connection,latest:p.latest_evidence,samples:p.samples},null,2))}</pre></details></div>`).join('');
+ $('platform-notes').textContent=d.limitations.join('；')+'。历史未标平台记录 '+d.unassigned_records+' 条。';
+ $('question-list').innerHTML=d.questions.map(q=>`<div class="item"><b>${esc(q.text)}</b><p>${esc(q.check)}</p>${['doubao','chatgpt'].map(id=>`<button class="secondary" data-question="${esc(q.id)}" data-product="${id}">${id==='doubao'?'豆包':'ChatGPT'}：准备观测</button>`).join('')}</div>`).join('');
+ }catch(e){if(version===platformRequest)$('platform-notes').textContent=e.message;}
+}
+$('load-platforms').onclick=loadPlatforms;
+$('platform-list').onclick=async e=>{const id=e.target.dataset.platformTask;if(!id)return;const p=platformData.platforms.find(p=>p.id===id);const title='['+p.name+'] '+(p.connection?.next_action||p.next);if(relevant(state.tasks).some(t=>t.title===title&&!['done','deferred'].includes(t.state))){notice('该平台待办已在当前站点队列中。');return;}try{await api('/tasks','POST',{site_id:selected,title,priority:'P1'});notice('平台待办已加入整改队列。');await refresh();}catch(err){notice(err.message);}};
+$('question-list').onclick=e=>{const id=e.target.dataset.question;if(!id)return;const q=platformData.questions.find(q=>q.id===id),f=$('geo-form');f.reset();f.elements.platform.value=e.target.dataset.product;f.elements.product.value=e.target.dataset.product==='doubao'?'豆包':'ChatGPT';f.elements.question.value=q.text;f.elements.question_id.value=q.id;f.elements.mode.value='';setDates();document.querySelector('[data-tab="geo"]').click();notice('已准备固定问题表单，请在实际产品中测试后填写回答与证据。');};
+$('geo-form').elements.question.oninput=()=>{$('geo-form').elements.question_id.value='';};
+let coverageData=null;
+function renderCoverage(){
+ if(!coverageData)return;
+ const f=$('coverage-filter').value;
+ const rows=coverageData.items.filter(r=>f==='all'||f==='missing_map'&&(r.in_sitemap===false&&!r.local_noindex)||f==='unlinked'&&r.linked_from_catalog===false||r.status===f);
+ const labels={checked:'已检查',unchecked:'待检查',failed:'读取失败',blocked:'抓取受阻',noindex:'不参与索引',outside:'范围外项目'};
+ $('coverage-summary').textContent=`公开地址 ${coverageData.summary.total} · 管理范围 ${coverageData.summary.managed} · 有检查记录 ${coverageData.summary.checked} · 待检查 ${coverageData.summary.unchecked} · 未见地图入口 ${coverageData.summary.missing_map??'未知'}`;
+ $('coverage-list').innerHTML=rows.map(r=>`<div class="item"><span class="badge">${esc(r.kinds.join(' / '))}</span><span class="badge">${esc(labels[r.status])}</span><b>${esc(r.title)}</b><br>${link(r.url)}<p>地图：${r.in_sitemap===null?'范围外':r.in_sitemap?'已列入':'未见'} · 目录入口：${r.linked_from_catalog?'已发现':'待核对'} · 最近检查：${r.checked_at?date(r.checked_at):'尚无'}${r.checked_url&&r.checked_url!==r.url?'（依据规范目标 '+esc(r.checked_url)+'）':''}</p></div>`).join('')||empty('当前筛选没有内容');
+ $('coverage-notes').textContent=[...coverageData.warnings,...coverageData.limitations].join('\n');
+}
+$('load-coverage').onclick=async()=>{const b=$('load-coverage');b.disabled=true;try{coverageData=await api('/coverage');renderCoverage();notice('覆盖清单已更新，未检查不等于有故障。');}catch(e){notice(e.message);}finally{b.disabled=false;}};
+$('coverage-filter').onchange=renderCoverage;
+function setDates(){document.querySelectorAll('input[type=date]').forEach(x=>{if(!x.value)x.value=new Date().toLocaleDateString('en-CA');});}setDates();refresh();setInterval(()=>{if(state?.scans.some(s=>s.state==='running')&&!document.hidden)refresh();},5000);
+})();
