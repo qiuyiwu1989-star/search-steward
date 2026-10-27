@@ -1,1 +1,1 @@
-{"sites":[{"name":"Example site","url":"https://example.com/"}]}
+{"schema_version":1,"sites":[{"id":"example","name":"Example site","url":"https://example.com/"}]}

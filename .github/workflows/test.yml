@@ -13,3 +13,9 @@ jobs:
         env:
           STEWARD_DOMAINS: qiuyiwu.com
       - run: node --check assets/search-steward.js
+      - run: python scripts/steward_ops.py validate --root examples
+        env:
+          STEWARD_DOMAINS: example.com
+      - run: python scripts/steward_ops.py gate --root examples
+        env:
+          STEWARD_DOMAINS: example.com

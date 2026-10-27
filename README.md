@@ -13,7 +13,7 @@
 - 平台接入证据、GEO 真实回答/引用/人工审校、搜索效果历史。
 - 独立运行或通过 Blueprint 接入已有 Flask 后台。
 
-**不包含**：排名保证、模型引用保证、通用内容自动生成、搜索平台 OAuth 连接、主动提交执行器、独立调度器。百度适配器是旁路回执记录器，不发送网址。生产系统原有定时任务不随仓库复制。
+**不包含**：排名保证、模型引用保证、通用内容自动生成、搜索平台 OAuth 连接、独立调度器。`receipts.py` 是旁路记录器；002 新增执行器默认 dry-run，只有显式执行才发送。生产系统原有定时任务不随仓库复制。
 
 ## 本地启动
 
@@ -58,7 +58,7 @@ STEWARD_DOMAINS=qiuyiwu.com python3 -m unittest discover -s tests/search_steward
 node --check assets/search-steward.js
 ```
 
-21 项测试覆盖持久化、权限、SSRF、续查、复验、回执和独立入口。CI 不读取生产数据、密钥，也不触发部署。
+34 项测试覆盖持久化、权限、SSRF、续查、复验、回执和独立入口。CI 不读取生产数据、密钥，也不触发部署。
 
 ## 后续工作
 
@@ -68,3 +68,32 @@ node --check assets/search-steward.js
 - [开源提取规格](specs/001-standalone.md)
 
 本仓库独立运行通过测试，尚未替换个人站的生产模块。采用 MIT License。
+
+## 公开清单与发布闸门（002）
+
+清单使用 `schema_version: 1`。内容必须有稳定 `id`、`kind`、`title`、`version`、`status: published` 和 `public: true`；发布闸门还要求相对的 HTML `path`。例子可直接检验：
+
+```sh
+STEWARD_DOMAINS=example.com python3 scripts/steward_ops.py validate --root examples
+STEWARD_DOMAINS=example.com python3 scripts/steward_ops.py gate --root examples
+```
+
+闸门拒绝空清单、路径越界/私有路径、无可读正文、缺少标题、错误 canonical、noindex 冲突及坏 JSON-LD。描述缺失、短文本、缺少 H1 是提醒，不假装为排名预测。它不代替线上检查。
+
+## 显式提交执行器（002）
+
+**不会安装定时任务。** 生产先执行[切换预案](docs/MIGRATION-002.md)，统一已有执行器及历史状态，不能把新队列当成空白历史重新提交。
+
+```sh
+# 只将已审核清单的正式、可索引地址入队；显式版本构成去重键。
+python3 scripts/steward_ops.py enqueue --root /private/content --queue-db /private/state/queue.sqlite3
+# 默认 dry-run，不发送请求。
+python3 scripts/steward_ops.py submit --host example.com --queue-db /private/state/queue.sqlite3
+# 配置此域名的 STEWARD_BAIDU_TOKEN 后，由操作者显式加 --execute。
+```
+
+每次最多十条，单 URL 回执确认；实际额度以服务端为准。请求不明确进入 `unknown`，阻止同域继续发送；进程崩溃留下 `sending`，同样必须凭依据人工恢复。状态不会因超时被当作失败自动重试。明确拒绝保留为 `failed`；额度不足保留 `pending`。源码不记录密钥或原始服务端报文。
+
+`export-receipts --store-db ... --site-id ...` 将回执幂等导入管家。队列和管理库必须保存在私有位置，使用同一个 runner 标识重复导入。当前不自动导入历史队列，也不自动补报人工核验结果；见迁移预案。
+
+问题聚合入口为后台“问题聚合”栏目和 `/api/inside/search-steward/issues/groups`：按站点/规则聚合未关闭任务，保留原始状态和证据，不能据此认定同一根因。

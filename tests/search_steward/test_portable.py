@@ -16,7 +16,7 @@ class PortableTests(unittest.TestCase):
    response=client.get('/');self.assertEqual(response.status_code,200);response.close()
  def test_manifest_unknown_coverage_is_not_failure(self):
   with tempfile.TemporaryDirectory() as d:
-   p=Path(d);(p/'content.json').write_text(json.dumps({'items':[{'url':'https://qiuyiwu.com/','title':'Public'}]}))
+   p=Path(d);(p/'content.json').write_text(json.dumps({'schema_version':1,'items':[{'id':'public','url':'https://qiuyiwu.com/','title':'Public','kind':'page','status':'published','public':True,'version':'1'}]}))
    s=Store(p/'state.sqlite3');report=inventory(p,s)
    self.assertEqual(report['items'][0]['status'],'unchecked')
    self.assertIsNone(report['items'][0]['in_sitemap'])

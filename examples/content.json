@@ -1,1 +1,1 @@
-{"items":[{"url":"https://example.com/","title":"Example homepage","kind":"topic"}]}
+{"schema_version":1,"items":[{"id":"example-home","url":"https://example.com/","title":"Example homepage","kind":"topic","status":"published","public":true,"version":"1","path":"index.html"}]}

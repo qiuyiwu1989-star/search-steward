@@ -61,10 +61,8 @@ class Store:
         c.execute('INSERT INTO events(subject,action,detail,created) VALUES(?,?,?,?)', (subject, action, json.dumps(detail, ensure_ascii=False), now()))
 
     def seed(self, root):
-        manifest = Path(root) / 'sites.json'
-        entries = []
-        if manifest.exists():
-            entries = [(x['name'], x['url']) for x in json.loads(manifest.read_text())['sites']]
+        from .manifest import read_manifest
+        entries = [(x['name'], x['url']) for x in read_manifest(root, 'sites')]
         with self.db() as c:
             for name, url in entries:
                 c.execute('INSERT OR IGNORE INTO sites VALUES(?,?,?,?)', (uuid4().hex, name, clean_url(url, True).rstrip('/')+'/', now()))

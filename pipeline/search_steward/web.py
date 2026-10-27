@@ -28,6 +28,10 @@ def create_blueprint(path, root, authorize):
         return d
     @bp.get('/snapshot')
     def snapshot(): return jsonify(store.snapshot())
+    @bp.get('/issues/groups')
+    def issue_groups():
+        from .issues import grouped_tasks
+        return jsonify(groups=grouped_tasks(store))
     @bp.get('/coverage')
     def coverage():
         from .coverage import inventory
